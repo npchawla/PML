@@ -1,0 +1,177 @@
+---
+title: "PML Course Project Writeup"
+author: "Naren Chawla"
+date: "Friday, June 19, 2015"
+output: html_document
+---
+
+In this project, we have to use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. This participants were asked to perform barbell lifts correctly and incorrectly in 5 different ways. 
+
+The objective is to build a model that will predict, based on accelerometers measurements, whether the participant performed the barbell lifts correctly or incorrectly.
+
+The training data:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data:
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+### Our approach
+
+1. Data Preparation & Feature selection - Clean-up the data to get ready for modeling
+2. Split the training data to training and validation set
+3. Experiment with different models - Random Fores, Gradient boosted model & Linear Discrimant Analysis - to find the most accurate model
+4. Finally, once we find the model fit, run the test data against the selected model to generate predictions (for submissions)
+
+Let's start by loading all the relevant libraries.
+
+
+StartTime = 
+```{r}
+#StartTime
+Sys.time()
+```
+
+
+
+```{r}
+options(warn = -1)
+library(doParallel)
+cluster <- makeCluster(detectCores())
+registerDoParallel(cluster)
+library(ggplot2)
+library(caret)
+library(randomForest)
+library(e1071)
+library(survival)
+library(splines)
+library(plyr)
+library(doParallel)
+cl <- makeCluster(detectCores())
+registerDoParallel(cl)
+setwd("C:/my/github/PracticalMachineLearning")
+```
+
+Next, let's load the data -
+
+```{r}
+training<-read.csv("C:/my/github/PracticalMachineLearning/pml-training.csv")
+testing<-read.csv("C:/my/github/PracticalMachineLearning/pml-testing.csv")
+```
+
+Now let's clean-up the data and get rid of columns with more than 95%  of"NA"" and "" values.  Also, we will get rid of first 5 column, since they are noise for most part.  Also, columns with very few unique values relative to sample size (more noise)
+
+```{r}
+#Number of cols in original dataset
+ncol(training)
+thresold<-dim(training)[1]*0.95
+#Get rid of first five columns
+training<-training[,6:dim(training)[2]]
+goodColumns<- !apply(training, 2, function(x) sum(is.na(x)) > thresold || sum(x == "") > thresold)
+training<-training[,goodColumns]
+# Find columns with very few unique values
+badColumns<-nearZeroVar(training, saveMetrics = TRUE)
+training<-training[, badColumns$nzv == FALSE]
+#Number of cols after cleansing
+ncol(training)
+
+#Let's clean-up the testing data set as well
+ncol(testing)
+testing<-testing[,6:dim(testing)[2]]
+testing<-testing[,goodColumns]
+testing<-testing[, badColumns$nzv == FALSE]
+ncol(testing)
+```
+
+Now that we have clean data.  Let's partition the data into training and validation set.
+
+```{r}
+inTrain <- createDataPartition(training$classe, p = 0.6)[[1]]
+training <- training[ inTrain,]
+crossv <- training[-inTrain,]
+# let's also create a subset for calculate out-of-sample error to avoid over-fitting
+inTrain<-createDataPartition(crossv$classe, p=0.75)[[1]]
+crossv_test<-crossv[-inTrain,]
+crossv<-crossv[inTrain,]
+
+```
+
+Ok,now we are ready to train our models.  We will try out three different models - rf, gbm, lda. 
+
+
+```{r}
+mod1 <- train(classe ~ ., data=training, method="rf")
+#mod2 <- train(classe ~ ., data=training, method="rf")
+#mod3 <- train(classe ~ ., data=training, method="lda")
+
+#Let's predict with each model 
+pred1<-predict(mod1, crossv)
+#pred2<-predict(mod2, crossv)
+#pred3<-predict(mod3, crossv)
+#Accuracy?
+confusionMatrix(pred1, crossv$classe)
+#confusionMatrix(pred2, crossv$classe)
+#confusionMatrix(pred3, crossv$classe)
+
+#What about out-of-sample error
+
+predOOS<-predict(mod1, crossv_test)
+ooSample_Accuracy <- sum(predOOS == crossv_test$classe)/length(predOOS)
+```
+ooSample_Accuracy = 
+
+```{r}
+ooSample_Accuracy
+```
+
+
+Accuracy for different models:
+
+Random-Forest: 99.8%
+Gradient Boosted Model: 99.3%
+Linear Discrimant Analysis: 72%
+
+Random Forest is most accurate and also, took the most time to run on my machine.  Cleary, we will go with Random Forest in this case.  The accuracy of the model is so high, that I doubt we have to fine-tune the parameters any further.  However, for illustration, we will show variable importance for top variables
+
+```{r}
+varImpRF <- train(classe ~ ., data = training, method = "rf")
+varImpObj <- varImp(varImpRF)
+# Top 25 plot
+plot(varImpObj, main = "Importance of Top 25 Variables", top = 25)
+```
+
+Well, "num_window" seems to be the most significant predictor. 
+
+###Conclusion
+
+Clearly, given the accuracy and out-of-sample error, Random Forest is the winner.   Though, Random Forest takes the longest to run.  In general, Random Forests are good when dealing with large number of input variables and the interaction between those variable are unknown.
+
+### Submission
+
+```{r}
+pml_write_files = function(x){
+n = length(x)
+for(i in 1:n){
+filename = paste0("problem_id_",i,".txt")
+write.table(x[i],file=filename,quote=FALSE,row.names=FALSE,col.names=FALSE)
+}
+}
+
+answers <- predict(mod1, testing)
+answers
+pml_write_files(answers)
+```
+EndTime = 
+```{r}
+#StartTime
+Sys.time()
+```
+
+```{r}
+stopCluster(cluster)
+```
+
+EndTime = 
+```{r}
+#EndTime
+Sys.time()
+```
